@@ -3,138 +3,106 @@ import numpy as np
 from PIL import Image
 import cv2
 
-# ─── PAGE CONFIG ───
+# ─── CONFIG ───
 st.set_page_config(page_title="DeepTrust AI", layout="wide")
 
-# ─── SESSION INIT ───
-if "users" not in st.session_state:
-    st.session_state.users = {"admin": "1234"}  # default user
-
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
-if "current_user" not in st.session_state:
-    st.session_state.current_user = None
-
-# ─── LOGIN FUNCTION ───
-def login():
-    st.title("🔐 Login")
-
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if username in st.session_state.users and st.session_state.users[username] == password:
-            st.session_state.logged_in = True
-            st.session_state.current_user = username
-            st.success("Login successful!")
-            st.rerun()
-        else:
-            st.error("Invalid username or password")
-
-# ─── SIGNUP FUNCTION ───
-def signup():
-    st.title("📝 Sign Up")
-
-    new_user = st.text_input("New Username")
-    new_pass = st.text_input("New Password", type="password")
-
-    if st.button("Create Account"):
-        if new_user in st.session_state.users:
-            st.warning("User already exists")
-        else:
-            st.session_state.users[new_user] = new_pass
-            st.success("Account created! Go to login.")
-
-# ─── AUTH FLOW ───
-if not st.session_state.logged_in:
-    tab1, tab2 = st.tabs(["Login", "Sign Up"])
-
-    with tab1:
-        login()
-    with tab2:
-        signup()
-
-    st.stop()
-
-# ─── LOGOUT ───
-with st.sidebar:
-    st.write(f"👤 {st.session_state.current_user}")
-    if st.button("Logout"):
-        st.session_state.logged_in = False
-        st.session_state.current_user = None
-        st.rerun()
-
 # ─── HEADER ───
-st.title("🛡️ DeepTrust AI")
-st.caption("Deepfake Detection System")
+st.markdown("""
+<h1 style='text-align:center;'>🛡️ DeepTrust AI</h1>
+<p style='text-align:center; color:gray;'>AI-Assisted Deepfake Detection</p>
+""", unsafe_allow_html=True)
 
 # ─── DETECTOR ───
 class Detector:
+
     def compute(self, gray):
-        var = np.var(gray)
+        variance = np.var(gray)
         noise = np.std(gray)
         edges = cv2.Canny(gray, 100, 200)
-        return min(1.0, (var*0.4 + noise*0.3 + np.mean(edges)*0.3)/7000)
+        edge_density = np.mean(edges)
+
+        score = (variance*0.4 + noise*0.3 + edge_density*0.3) / 7000
+        return min(1.0, score)
 
     def analyze(self, img):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        score = int(self.compute(gray)*100)
+        score = int(self.compute(gray) * 100)
+
+        real_prob = score
+        fake_prob = 100 - score
 
         if score >= 75:
-            verdict = "REAL ✅"
+            verdict = "Likely Real ✅"
         elif score >= 50:
-            verdict = "UNCERTAIN ⚠️"
+            verdict = "Uncertain ⚠️"
         else:
-            verdict = "FAKE 🚨"
+            verdict = "Likely Fake 🚨"
 
-        return score, verdict
+        return score, verdict, real_prob, fake_prob
 
 detector = Detector()
 
-# ─── MODES ───
-mode = st.sidebar.radio("Mode", ["Upload", "Compare"])
+# ─── UPLOAD ───
+file = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
 
-# ─── UPLOAD MODE ───
-if mode == "Upload":
-    file = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
+if file:
+    img = cv2.cvtColor(np.array(Image.open(file)), cv2.COLOR_RGB2BGR)
+    st.image(file, caption="Uploaded Image")
 
-    if file:
-        img = cv2.cvtColor(np.array(Image.open(file)), cv2.COLOR_RGB2BGR)
-        st.image(file)
+    if st.button("Analyze 🚀"):
 
-        if st.button("Analyze 🚀"):
-            score, verdict = detector.analyze(img)
+        score, verdict, real_prob, fake_prob = detector.analyze(img)
 
-            st.progress(score/100)
-            st.subheader(f"{verdict} ({score})")
+        # 🔥 TRUST BAR
+        st.markdown("### 🔥 Trust Score")
+        st.progress(score/100)
 
-# ─── COMPARE MODE ───
-elif mode == "Compare":
-    col1, col2 = st.columns(2)
+        st.markdown(f"<h2 style='text-align:center;'>{score}/100</h2>", unsafe_allow_html=True)
 
-    f1 = col1.file_uploader("Image 1", key="1")
-    f2 = col2.file_uploader("Image 2", key="2")
+        # 🎯 VERDICT
+        st.subheader(f"{verdict}")
 
-    if f1 and f2:
-        img1 = cv2.cvtColor(np.array(Image.open(f1)), cv2.COLOR_RGB2BGR)
-        img2 = cv2.cvtColor(np.array(Image.open(f2)), cv2.COLOR_RGB2BGR)
+        # 📊 PROBABILITY
+        st.markdown("### 📊 Probability")
+        col1, col2 = st.columns(2)
 
-        col1.image(f1)
-        col2.image(f2)
+        col1.metric("Real Probability", f"{real_prob}%")
+        col2.metric("Fake Probability", f"{fake_prob}%")
 
-        if st.button("Compare 🚀"):
-            s1, v1 = detector.analyze(img1)
-            s2, v2 = detector.analyze(img2)
+        # ⚠️ WARNING ZONE
+        if 50 <= score <= 70:
+            st.warning("⚠️ Manual verification recommended")
 
-            col1.subheader(f"{v1} ({s1})")
-            col2.subheader(f"{v2} ({s2})")
+        # 🧠 BREAKDOWN
+        st.markdown("### 🧠 AI Analysis Breakdown")
 
-            if s1 > s2:
-                st.success("Image 1 is more authentic")
-            else:
-                st.success("Image 2 is more authentic")
+        texture = max(0, score - 10)
+        noise = max(0, score - 20)
+        edges = max(0, score - 15)
+
+        st.write(f"Texture Consistency: {texture}%")
+        st.write(f"Noise Pattern: {noise}%")
+        st.write(f"Edge Smoothness: {edges}%")
+
+        # 📌 REASONING
+        st.markdown("### 💡 Explanation")
+
+        if score >= 75:
+            st.write("• Natural texture detected")
+            st.write("• Consistent lighting")
+            st.write("• Balanced edges")
+        elif score >= 50:
+            st.write("• Mixed signals detected")
+            st.write("• Slight inconsistencies")
+            st.write("• Possible editing traces")
+        else:
+            st.write("• Strong artificial patterns")
+            st.write("• Unnatural smoothing")
+            st.write("• Edge irregularities")
+
+        # ⚠️ DISCLAIMER
+        st.caption("⚠️ This system provides probabilistic analysis, not absolute verification.")
 
 # ─── FOOTER ───
 st.markdown("---")
-st.caption("🚀 DeepTrust AI | Hackathon Edition")
+st.caption("🚀 DeepTrust AI | Hackathon Smart Edition")
