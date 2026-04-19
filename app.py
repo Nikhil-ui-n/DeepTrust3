@@ -1,84 +1,73 @@
 import streamlit as st
 import numpy as np
 from PIL import Image
-import hashlib
-import tempfile
-from io import BytesIO
-
-try:
-    import cv2
-    CV2 = True
-except:
-    CV2 = False
+import cv2
 
 # ─── PAGE CONFIG ───
 st.set_page_config(page_title="DeepTrust AI", layout="wide")
 
-# ─── CUSTOM UI (🔥 MODERN LOOK) ───
-st.markdown("""
-<style>
-body {
-    background: linear-gradient(135deg, #0f172a, #1e293b);
-    color: white;
-}
+# ─── SESSION INIT ───
+if "users" not in st.session_state:
+    st.session_state.users = {"admin": "1234"}  # default user
 
-.stApp {
-    background: linear-gradient(135deg, #0f172a, #1e293b);
-}
-
-.glass {
-    background: rgba(255,255,255,0.05);
-    padding: 20px;
-    border-radius: 15px;
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.1);
-}
-
-.title {
-    text-align: center;
-    font-size: 40px;
-    font-weight: bold;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# ─── LOGIN SYSTEM ───
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
+
+# ─── LOGIN FUNCTION ───
 def login():
-    st.markdown("<div class='title'>🔐 Login to DeepTrust</div>", unsafe_allow_html=True)
-    
+    st.title("🔐 Login")
+
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
     if st.button("Login"):
-        if username == "admin" and password == "1234":
+        if username in st.session_state.users and st.session_state.users[username] == password:
             st.session_state.logged_in = True
-            st.success("Login Successful ✅")
+            st.session_state.current_user = username
+            st.success("Login successful!")
+            st.rerun()
         else:
-            st.error("Invalid credentials")
+            st.error("Invalid username or password")
 
+# ─── SIGNUP FUNCTION ───
 def signup():
-    st.markdown("<div class='title'>📝 Create Account</div>", unsafe_allow_html=True)
-    st.text_input("New Username")
-    st.text_input("New Password", type="password")
-    st.button("Sign Up (Demo)")
+    st.title("📝 Sign Up")
+
+    new_user = st.text_input("New Username")
+    new_pass = st.text_input("New Password", type="password")
+
+    if st.button("Create Account"):
+        if new_user in st.session_state.users:
+            st.warning("User already exists")
+        else:
+            st.session_state.users[new_user] = new_pass
+            st.success("Account created! Go to login.")
 
 # ─── AUTH FLOW ───
 if not st.session_state.logged_in:
     tab1, tab2 = st.tabs(["Login", "Sign Up"])
+
     with tab1:
         login()
     with tab2:
         signup()
+
     st.stop()
 
-# ─── MAIN APP ───
+# ─── LOGOUT ───
+with st.sidebar:
+    st.write(f"👤 {st.session_state.current_user}")
+    if st.button("Logout"):
+        st.session_state.logged_in = False
+        st.session_state.current_user = None
+        st.rerun()
 
-# 🔥 HEADER
-st.markdown("<div class='title'>🛡️ DeepTrust AI</div>", unsafe_allow_html=True)
-st.caption("Advanced Deepfake Detection System")
+# ─── HEADER ───
+st.title("🛡️ DeepTrust AI")
+st.caption("Deepfake Detection System")
 
 # ─── DETECTOR ───
 class Detector:
@@ -103,10 +92,10 @@ class Detector:
 
 detector = Detector()
 
-# ─── SIDEBAR ───
+# ─── MODES ───
 mode = st.sidebar.radio("Mode", ["Upload", "Compare"])
 
-# ─── UPLOAD ───
+# ─── UPLOAD MODE ───
 if mode == "Upload":
     file = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
 
@@ -117,16 +106,15 @@ if mode == "Upload":
         if st.button("Analyze 🚀"):
             score, verdict = detector.analyze(img)
 
-            st.markdown("### Result")
             st.progress(score/100)
             st.subheader(f"{verdict} ({score})")
 
-# ─── COMPARE ───
+# ─── COMPARE MODE ───
 elif mode == "Compare":
     col1, col2 = st.columns(2)
 
-    f1 = col1.file_uploader("Image 1")
-    f2 = col2.file_uploader("Image 2")
+    f1 = col1.file_uploader("Image 1", key="1")
+    f2 = col2.file_uploader("Image 2", key="2")
 
     if f1 and f2:
         img1 = cv2.cvtColor(np.array(Image.open(f1)), cv2.COLOR_RGB2BGR)
@@ -141,6 +129,11 @@ elif mode == "Compare":
 
             col1.subheader(f"{v1} ({s1})")
             col2.subheader(f"{v2} ({s2})")
+
+            if s1 > s2:
+                st.success("Image 1 is more authentic")
+            else:
+                st.success("Image 2 is more authentic")
 
 # ─── FOOTER ───
 st.markdown("---")
