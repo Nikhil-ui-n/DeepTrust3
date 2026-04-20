@@ -2,89 +2,25 @@ import streamlit as st
 import numpy as np
 import cv2
 from PIL import Image
-import json
-import hashlib
-import os
 
-# ─── CONFIG ───
 st.set_page_config(page_title="DeepTrust AI", layout="wide")
 
-USER_FILE = "users.json"
+# ─── UI STYLE ───
+st.markdown("""
+<style>
+body {
+    background: linear-gradient(135deg,#0f172a,#1e293b);
+    color:white;
+}
+.big-title {
+    text-align:center;
+    font-size:40px;
+    font-weight:bold;
+}
+</style>
+""", unsafe_allow_html=True)
 
-# ─── USER STORAGE ───
-def load_users():
-    if not os.path.exists(USER_FILE):
-        return {}
-    with open(USER_FILE, "r") as f:
-        return json.load(f)
-
-def save_users(users):
-    with open(USER_FILE, "w") as f:
-        json.dump(users, f)
-
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-# ─── SESSION INIT ───
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-users = load_users()
-
-# ─── AUTH ───
-def login():
-    st.subheader("🔐 Login")
-
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if username in users and users[username] == hash_password(password):
-            st.session_state.logged_in = True
-            st.session_state.user = username
-            st.success("Login successful")
-            st.rerun()
-        else:
-            st.error("Invalid credentials")
-
-def signup():
-    st.subheader("📝 Sign Up")
-
-    username = st.text_input("New Username")
-    password = st.text_input("New Password", type="password")
-
-    if st.button("Create Account"):
-        if username in users:
-            st.warning("User already exists")
-        else:
-            users[username] = hash_password(password)
-            save_users(users)
-            st.success("Account created")
-
-# ─── AUTH FLOW ───
-if not st.session_state.logged_in:
-    tab1, tab2 = st.tabs(["Login", "Sign Up"])
-
-    with tab1:
-        login()
-    with tab2:
-        signup()
-
-    st.stop()
-
-# ─── LOGOUT ───
-with st.sidebar:
-    st.write(f"👤 {st.session_state.user}")
-    if st.button("Logout"):
-        st.session_state.logged_in = False
-        st.rerun()
-
-# ─── HEADER ───
-st.title("🛡️ DeepTrust AI")
-st.caption("AI-assisted Deepfake Detection")
+st.markdown("<div class='big-title'>🛡️ DeepTrust AI</div>", unsafe_allow_html=True)
 
 # ─── DETECTOR ───
 class Detector:
@@ -95,88 +31,90 @@ class Detector:
         )
         return face.detectMultiScale(gray, 1.3, 5)
 
-    def compute(self, img):
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    def score_face(self, face_img):
+        gray = cv2.cvtColor(face_img, cv2.COLOR_BGR2GRAY)
 
-        # Face detection
+        texture = cv2.Laplacian(gray, cv2.CV_64F).var()
+        noise = np.std(gray)
+        edges = np.mean(cv2.Canny(gray,100,200))
+
+        score = (texture*0.4 + noise*0.3 + edges*0.3)/8000
+        return min(1, score)
+
+    def analyze(self, img):
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         faces = self.detect_face(gray)
 
         if len(faces) == 0:
-            return 70, "No face detected → fallback analysis"
+            return 65, "Non-face image → limited analysis"
 
-        # Texture
-        lap = cv2.Laplacian(gray, cv2.CV_64F).var()
+        scores = []
 
-        # Noise
-        noise = np.std(gray)
+        for (x,y,w,h) in faces:
+            face = img[y:y+h, x:x+w]
+            scores.append(self.score_face(face))
 
-        # Edges
-        edges = cv2.Canny(gray, 100, 200)
-        edge_density = np.mean(edges)
+        final = int(np.mean(scores)*100)
 
-        # Color consistency
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        color_var = np.var(hsv[:,:,1])
-
-        # Weighted score
-        score = (
-            0.3 * (lap/100) +
-            0.2 * (noise/50) +
-            0.3 * (edge_density/50) +
-            0.2 * (color_var/1000)
-        )
-
-        score = max(0, min(1, score))
-        return int(score*100), None
-
-    def analyze(self, img):
-        score, note = self.compute(img)
-
-        if score >= 75:
+        if final >= 75:
             verdict = "Likely Real ✅"
-        elif score >= 50:
+        elif final >= 50:
             verdict = "Uncertain ⚠️"
         else:
             verdict = "Likely Fake 🚨"
 
-        return score, verdict, note
+        return final, verdict
 
 detector = Detector()
 
-# ─── MAIN ───
-file = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
+# ─── SIDEBAR ───
+mode = st.sidebar.radio("Mode", ["Upload", "Compare"])
 
-if file:
-    img = cv2.cvtColor(np.array(Image.open(file)), cv2.COLOR_RGB2BGR)
-    st.image(file)
+# ─── UPLOAD ───
+if mode == "Upload":
+    file = st.file_uploader("Upload Image", type=["jpg","png","jpeg"])
 
-    if st.button("Analyze 🚀"):
-        score, verdict, note = detector.analyze(img)
+    if file:
+        img = cv2.cvtColor(np.array(Image.open(file)), cv2.COLOR_RGB2BGR)
+        st.image(file, use_column_width=True)
 
-        st.markdown("### 🔥 Trust Score")
-        st.progress(score/100)
-        st.subheader(f"{verdict} ({score})")
+        if st.button("Analyze 🚀"):
+            score, verdict = detector.analyze(img)
 
-        col1, col2 = st.columns(2)
-        col1.metric("Real Probability", f"{score}%")
-        col2.metric("Fake Probability", f"{100-score}%")
+            st.progress(score/100)
+            st.subheader(f"{verdict} ({score})")
 
-        if note:
-            st.info(note)
+            col1, col2 = st.columns(2)
+            col1.metric("Real", f"{score}%")
+            col2.metric("Fake", f"{100-score}%")
 
-        if 50 <= score <= 70:
-            st.warning("Manual verification recommended")
+# ─── 🔥 FIXED COMPARE MODE ───
+elif mode == "Compare":
 
-        st.markdown("### 🧠 Explanation")
+    col1, col2 = st.columns(2)
 
-        if score >= 75:
-            st.write("• Natural texture")
-            st.write("• Stable lighting")
-        elif score >= 50:
-            st.write("• Mixed signals")
-            st.write("• Possible edits")
-        else:
-            st.write("• Artificial patterns")
-            st.write("• Edge inconsistencies")
+    file1 = col1.file_uploader("Image 1", key="1")
+    file2 = col2.file_uploader("Image 2", key="2")
 
-        st.caption("⚠️ Probabilistic AI system — not 100% guarantee")
+    if file1 and file2:
+        img1 = cv2.cvtColor(np.array(Image.open(file1)), cv2.COLOR_RGB2BGR)
+        img2 = cv2.cvtColor(np.array(Image.open(file2)), cv2.COLOR_RGB2BGR)
+
+        col1.image(file1)
+        col2.image(file2)
+
+        if st.button("Compare 🚀"):
+            s1, v1 = detector.analyze(img1)
+            s2, v2 = detector.analyze(img2)
+
+            col1.subheader(f"{v1} ({s1})")
+            col2.subheader(f"{v2} ({s2})")
+
+            st.markdown("## 🔍 Insight")
+
+            if abs(s1 - s2) < 10:
+                st.warning("Both images look similar")
+            elif s1 > s2:
+                st.success("Image 1 is more authentic")
+            else:
+                st.success("Image 2 is more authentic")
